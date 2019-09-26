@@ -2,6 +2,9 @@
 
 from smbus2 import SMBus
 import time
+import json
+import datetime
+from collections import OrderedDict
 
 bus_number  = 1
 i2c_address = 0x76
@@ -58,7 +61,7 @@ def get_calib_param():
 		if digH[i] & 0x8000:
 			digH[i] = (-digH[i] ^ 0xFFFF) + 1  
 
-def readData():
+def readData(dict):
 	data = []
 	for i in range (0xF7, 0xF7+8):
 		data.append(bus.read_byte_data(i2c_address,i))
@@ -66,11 +69,12 @@ def readData():
 	temp_raw = (data[3] << 12) | (data[4] << 4) | (data[5] >> 4)
 	hum_raw  = (data[6] << 8)  |  data[7]
 	
-	compensate_T(temp_raw)
-	compensate_P(pres_raw)
-	compensate_H(hum_raw)
+	compensate_T(temp_raw,dict)
+	compensate_P(pres_raw,dict)
+	compensate_H(hum_raw,dict)
 
-def compensate_P(adc_P):
+
+def compensate_P(adc_P,dict):
 	global  t_fine
 	pressure = 0.0
 	
@@ -93,16 +97,18 @@ def compensate_P(adc_P):
 	pressure = pressure + ((v1 + v2 + digP[6]) / 16.0)
 
 	print "pressure : %7.2f hPa" % (pressure/100)
+	dict["pres"] = pressure/100
 
-def compensate_T(adc_T):
+def compensate_T(adc_T,dict):
 	global t_fine
 	v1 = (adc_T / 16384.0 - digT[0] / 1024.0) * digT[1]
 	v2 = (adc_T / 131072.0 - digT[0] / 8192.0) * (adc_T / 131072.0 - digT[0] / 8192.0) * digT[2]
 	t_fine = v1 + v2
 	temperature = t_fine / 5120.0
-	print "temp : %-6.2f ℃" % (temperature) 
+	print "temp : %-6.2f ℃" % (temperature)
+	dict["temp"] = temperature
 
-def compensate_H(adc_H):
+def compensate_H(adc_H,dict):
 	global t_fine
 	var_h = t_fine - 76800.0
 	if var_h != 0:
@@ -115,13 +121,14 @@ def compensate_H(adc_H):
 	elif var_h < 0.0:
 		var_h = 0.0
 	print "hum : %6.2f ％" % (var_h)
+	dict["hum"] = var_h
 
 
 def setup():
 	osrs_t = 1			#Temperature oversampling x 1
 	osrs_p = 1			#Pressure oversampling x 1
 	osrs_h = 1			#Humidity oversampling x 1
-	mode   = 3			#Normal mode
+	mode   = 3			#Norma mode
 	t_sb   = 5			#Tstandby 1000ms
 	filter = 0			#Filter off
 	spi3w_en = 0			#3-wire SPI Disable
@@ -138,12 +145,19 @@ def setup():
 setup()
 
 get_calib_param()
-
+x = OrderedDict()
 
 if __name__ == '__main__':
 	try:
 		for i in range(5):
-			readData()
+ 			dict = OrderedDict()
+			now = str(datetime.datetime.now())
+			dict["time"] = now
+			readData(dict)
+			x['id'+str(i)] = dict
 			time.sleep(10)
 	except KeyboardInterrupt:
 		pass
+
+json_file = open('result.json','w')
+json.dump(x, json_file, indent = 4)
